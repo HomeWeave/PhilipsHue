@@ -13,7 +13,6 @@ setup(
     ],
     license='MIT',
     description='Philips Hue Plugin for HomeWeave',
-    long_description=open('README.md').read(),
     install_requires=[
         'weavelib',
     ]
