@@ -1,4 +1,0 @@
--e git+https://github.com/HomeWeave/WeaveLib.git#egg=weavelib-0.8
--e git+https://github.com/supersaiyanmode/Highlight.git#egg=highlight-0.8
-eventlet==0.21
--e .

@@ -1,0 +1,20 @@
+metadata {
+    name: "weavehue"
+    description: "Anton Plugin For Philips Hue"
+    remote_url: "https://github.com/HomeWeave/PhilipsHue"
+}
+runtime {
+    runtime_type: PY3
+    py3_runtime_info {
+        main_service_class: "weavehue.service.HuePlugin"
+        dependencies: "git+https://github.com/supersaiyanmode/pyhuelights.git"
+    }
+    pipes {
+        pipe_id: "instructions"
+        pipe_type: IOT_INSTRUCTION
+    }
+    pipes {
+        pipe_id: "events"
+        pipe_type: IOT_EVENTS
+    }
+}
