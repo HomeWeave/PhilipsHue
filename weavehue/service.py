@@ -10,15 +10,19 @@ from pyhuelights.registration import REGISTRATION_FAILED, REGISTRATION_SUCCEEDED
 from pyhuelights.manager import LightsManager
 from pyhuelights.discovery import DefaultDiscovery, DiscoveryFailed
 from pyhuelights.core import HueApp
+from pyhuelights.animations import SwitchOnEffect, SwitchOffEffect
 
 from pyantonlib.plugin import AntonPlugin
 from pyantonlib.channel import GenericInstructionController
 from pyantonlib.channel import GenericEventController
 from pyantonlib.utils import log_info
 from anton.plugin_pb2 import PipeType
+from anton.call_status_pb2 import CallStatus
 from anton.events_pb2 import GenericEvent, DeviceOnlineEvent, DeviceOfflineEvent
+from anton.events_pb2 import DeviceRegistrationEvent
 from anton.capabilities_pb2 import Capabilities, NotificationCapabilities
 from anton.capabilities_pb2 import DeviceRegistrationCapabilities
+from anton.instructions_pb2 import POWER_OFF, POWER_ON
 
 
 class Config(MutableMapping):
@@ -62,16 +66,34 @@ class HueDevicesController:
         self.send_event = send_event
         self.lights_manager = LightsManager(conn)
 
-    def start(self):
-        for light in self.lights_manager.get_all_lights():
+        self.devices = {}
 
+    def start(self):
+        for _, light in self.lights_manager.get_all_lights().items():
+            self.devices[light.unique_id] = light
+
+            capabilities = Capabilities()
             device_online = DeviceOnlineEvent(
                     friendly_name=light.name, capabilities=capabilities)
             event = GenericEvent(device_id=light.unique_id,
                                  device_online=device_online)
+            self.send_event(event)
 
     def on_power_state(self, instruction):
+        light = self.devices.get(instruction.device_id, None)
+        if not light:
+            return CallStatus(msg="Bad device ID.")
+
+        power_instruction = instruction.power_state_instruction
+
+        if power_instruction == POWER_OFF:
+            self.lights_manager.run_effect(light, SwitchOffEffect())
+        elif power_instruction == POWER_ON:
+            self.lights_manager.run_effect(light, SwitchOnEffect())
+
+    def on_color(self, instruction):
         pass
+
 
 
 class RegistrationController:
@@ -138,7 +160,7 @@ class HuePlugin(AntonPlugin):
     APIS = {}
 
     def setup(self, plugin_startup_info):
-        instruction_controller = GenericInstructionController(self.APIS)
+        self.instruction_controller = GenericInstructionController(self.APIS)
         event_controller = GenericEventController(lambda call_status: 0)
         event_controller.create_client(0, self.on_response)
         self.send_event = event_controller.create_client(0, self.on_response)
@@ -146,7 +168,7 @@ class HuePlugin(AntonPlugin):
 
         registry = self.channel_registrar()
         registry.register_controller(PipeType.IOT_INSTRUCTION,
-                                     instruction_controller)
+                                     self.instruction_controller)
         registry.register_controller(PipeType.IOT_EVENTS, event_controller)
 
     def on_start(self):
@@ -170,12 +192,27 @@ class HuePlugin(AntonPlugin):
                 time.sleep(30)
                 continue
 
+        username = self.config.get("username")
+        if username:
+            conn = AuthenticatedHueConnection(conn.host, username)
+            self.on_successful_registration(conn)
+            return
+
         controller = RegistrationController(conn, self.send_event, self.config,
                                             self.on_successful_registration)
-        self.APIS["device_registration_instruction"] = controller.on_instruction
+        self.instruction_controller.register_api(
+                "device_registration_instruction", controller.on_instruction)
 
     def on_successful_registration(self, conn):
-        del self.APIS["device_registration_instruction"]
+        self.instruction_controller.unregister_api(
+                "device_registration_instruction")
+
+        controller = HueDevicesController(conn, self.send_event)
+        self.instruction_controller.register_api(
+                "power_state_instruction", controller.on_power_state)
+        self.instruction_controller.register_api("color_instruction",
+                                                 controller.on_color)
 
 
+        controller.start()
 
