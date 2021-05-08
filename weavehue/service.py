@@ -104,27 +104,27 @@ class RegistrationController:
             self.watcher = RegistrationWatcher(self.conn.host,
                                                "PyHueLights#Anton",
                                                30.0, self.registration_callback)
+            self.watcher.start()
 
             self.send_registration_event(
                     "Please press the button on the hub",
-                    DeviceRegistrationEvent.EventyType.INFO)
+                    DeviceRegistrationEvent.INFO)
 
     def registration_callback(self):
-        self.watcher = None
         if self.watcher.status == REGISTRATION_FAILED:
             self.send_registration_event(
-                    "Registration Failed.",
-                    DeviceRegistrationEvent.EventyType.FAILURE)
+                    "Registration Failed.", DeviceRegistrationEvent.FAILURE)
         elif self.watcher.status == REGISTRATION_SUCEEDED:
             self.send_registration_event(
-                    "Registration successful!",
-                    DeviceRegistrationEvent.EventyType.SUCCESS)
+                    "Registration successful!", DeviceRegistrationEvent.SUCCESS)
             offline_event = GenericEvent(device_id=self.device_id,
                                          device_offline=DeviceOfflineEvent())
 
             conn = AuthenticatedHueConnection(self.conn.host,
                                               self.watcher.username)
             self.success_callback(conn)
+
+        self.watcher = None
 
     def send_registration_event(self, msg, event_type):
         device_registration = DeviceRegistrationEvent(event_type=event_type,
