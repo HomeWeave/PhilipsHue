@@ -9,8 +9,9 @@ from pyhuelights.registration import AuthenticatedHueConnection
 from pyhuelights.registration import REGISTRATION_FAILED, REGISTRATION_SUCCEEDED
 from pyhuelights.manager import LightsManager
 from pyhuelights.discovery import DefaultDiscovery, DiscoveryFailed
-from pyhuelights.core import HueApp
+from pyhuelights.core import HueApp, Color
 from pyhuelights.animations import SwitchOnEffect, SwitchOffEffect
+from pyhuelights.animations import SetLightStateEffect
 
 from pyantonlib.plugin import AntonPlugin
 from pyantonlib.channel import GenericInstructionController
@@ -92,8 +93,25 @@ class HueDevicesController:
             self.lights_manager.run_effect(light, SwitchOnEffect())
 
     def on_color(self, instruction):
-        pass
+        light = self.devices.get(instruction.device_id, None)
+        if not light:
+            return CallStatus(msg="Bad device ID.")
 
+        color_space = instruction.color_instruction.WhichOneof('ColorMode')
+
+        if color_space == 'rgb':
+            color = Color.from_rgb(instruction.color_instruction.rgb.red,
+                                   instruction.color_instruction.rgb.green,
+                                   instruction.color_instruction.rgb.blue)
+        elif color_space == 'temperature':
+            color = Color.from_temperature(
+                    instruction.color_instruction.temperature.kelvin)
+        elif color_space == 'hs':
+            color = Color.from_hue_sat(instruction.color_instruction.hs.hue,
+                                       instruction.color_instruction.hs.sat)
+
+        effect = SetLightStateEffect(on=True, color=color)
+        self.lights_manager.run_effect(light, effect)
 
 
 class RegistrationController:
