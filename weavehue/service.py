@@ -1,5 +1,6 @@
 import time
 import json
+from collections.abc import MutableMapping
 from pathlib import Path
 from threading import Thread
 
@@ -20,10 +21,10 @@ from anton.capabilities_pb2 import Capabilities, NotificationCapabilities
 from anton.capabilities_pb2 import DeviceRegistrationCapabilities
 
 
-class Config:
+class Config(MutableMapping):
     def __init__(self, path):
         self.path = path
-        self.config = self.reload_config()
+        self.reload_config()
 
     def reload_config(self):
         try:
@@ -43,6 +44,16 @@ class Config:
     def __setitem__(self, key, value):
         self.config[key] = value
         self.write_config()
+
+    def __delitem__(self, key):
+        del self.config[key]
+        self.write_config()
+
+    def __iter__(self):
+        return iter(self.config)
+
+    def __len__(self):
+        return len(self.config)
 
 
 class HueDevicesController:
