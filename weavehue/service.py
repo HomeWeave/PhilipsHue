@@ -17,13 +17,16 @@ from pyantonlib.plugin import AntonPlugin
 from pyantonlib.channel import GenericInstructionController
 from pyantonlib.channel import GenericEventController
 from pyantonlib.utils import log_info
-from anton.plugin_pb2 import PipeType
+from anton.plugin_pb2 import IOT_INSTRUCTION, IOT_EVENTS
 from anton.call_status_pb2 import CallStatus
-from anton.events_pb2 import GenericEvent, DeviceOnlineEvent, DeviceOfflineEvent
+from anton.device_pb2 import DEVICE_KIND_LIGHTS, DEVICE_STATUS_ONLINE
+from anton.device_pb2 import DEVICE_STATUS_UNREGISTERED, DEVICE_STATUS_OFFLINE
+from anton.events_pb2 import GenericEvent
 from anton.events_pb2 import DeviceRegistrationEvent
-from anton.capabilities_pb2 import Capabilities, NotificationCapabilities
-from anton.capabilities_pb2 import DeviceRegistrationCapabilities
-from anton.instructions_pb2 import POWER_OFF, POWER_ON
+from anton.capabilities_pb2 import Capabilities, DeviceRegistrationCapabilities
+from anton.power_pb2 import POWER_OFF, POWER_ON
+from anton.color_pb2 import COLOR_MODEL_RGB, COLOR_MODEL_HUE_SAT
+from anton.color_pb2 import COLOR_MODEL_TEMPERATURE
 
 
 class Config(MutableMapping):
@@ -74,10 +77,23 @@ class HueDevicesController:
             self.devices[light.unique_id] = light
 
             capabilities = Capabilities()
-            device_online = DeviceOnlineEvent(
-                    friendly_name=light.name, capabilities=capabilities)
-            event = GenericEvent(device_id=light.unique_id,
-                                 device_online=device_online)
+            capabilities.power_state.supported_power_states[:] = [
+                    POWER_OFF, POWER_ON]
+
+            color_modes = light.capabilities.supported_color_modes()
+            if "hs" in color_modes:
+                capabilities.color.color_models.append(COLOR_MODEL_RGB)
+                capabilities.color.color_models.append(COLOR_MODEL_HUE_SAT)
+            if "ct" in color_modes:
+                capabilities.color.color_models.append(COLOR_MODEL_TEMPERATURE)
+
+            event = GenericEvent(device_id=light.unique_id)
+            event.device.friendly_name = light.name
+            event.device.device_kind = DEVICE_KIND_LIGHTS
+            event.device.device_status = DEVICE_STATUS_ONLINE
+            event.device.capabilities = capabilities
+            event.device.online.capabilities = capabilities
+
             self.send_event(event)
 
     def on_power_state(self, instruction):
@@ -85,7 +101,7 @@ class HueDevicesController:
         if not light:
             return CallStatus(msg="Bad device ID.")
 
-        power_instruction = instruction.power_state_instruction
+        power_instruction = instruction.power_state
 
         if power_instruction == POWER_OFF:
             self.lights_manager.run_effect(light, SwitchOffEffect())
@@ -97,7 +113,7 @@ class HueDevicesController:
         if not light:
             return CallStatus(msg="Bad device ID.")
 
-        color_space = instruction.color_instruction.WhichOneof('ColorMode')
+        color_space = instruction.color.WhichOneof('ColorMode')
 
         if color_space == 'rgb':
             color = Color.from_rgb(instruction.color_instruction.rgb.red,
@@ -126,21 +142,23 @@ class RegistrationController:
         self.device_id = "HueRegistration-" + str(id(self))
 
         # Send online event for the Bridge first, to enable registration.
-        device_reg_capabilities = DeviceRegistrationCapabilities(
-                greeting_text="Hue Bridge discovered. Register?",
-                icon_url="")
-        capabilities = Capabilities(
+        capabilities = Capabilities()
+        capabilities.device_registration_capabilities.greeting_text = (
+                "Hue Bridge discovered. Register?")
                 device_registration_capabilities=device_reg_capabilities)
-        online_event = DeviceOnlineEvent(friendly_name="Hue Bridge",
-                                         capabilities=capabilities)
-        event = GenericEvent(device_id=self.device_id,
-                             device_online=online_event)
+
+        event = GenericEvent(device_id=self.device_id)
+        event.device.friendly_name = "Hue Bridge"
+        event.device.device_kind = DEVICE_KIND_LIGHTS
+        event.device.device_status = DEVICE_STATUS_UNREGISTERED
+        event.device.capabilities = capabilities
+        event.device.registration.capabilities = capabilities
         self.send_event(event)
 
 
     def on_instruction(self, instruction):
-        if (instruction.device_registration_instruction.execute_step == 1 and
-            self.watcher is None):
+        if (instruction.device.device_registration_instruction.execute_step == 1
+            and self.watcher is None):
             self.watcher = RegistrationWatcher(self.conn.host,
                                                "PyHueLights#Anton",
                                                30.0, self.registration_callback)
@@ -157,8 +175,9 @@ class RegistrationController:
         elif self.watcher.status == REGISTRATION_SUCEEDED:
             self.send_registration_event(
                     "Registration successful!", DeviceRegistrationEvent.SUCCESS)
-            offline_event = GenericEvent(device_id=self.device_id,
-                                         device_offline=DeviceOfflineEvent())
+            offline_event = GenericEvent(device_id=self.device_id)
+            offline_event.device.device_status = DEVICE_STATUS_OFFLINE
+            offline_event.device.offline.SetInParent()
 
             conn = AuthenticatedHueConnection(self.conn.host,
                                               self.watcher.username)
@@ -167,10 +186,9 @@ class RegistrationController:
         self.watcher = None
 
     def send_registration_event(self, msg, event_type):
-        device_registration = DeviceRegistrationEvent(event_type=event_type,
-                                                      event_message=msg)
-        event = GenericEvent(device_registration=device_registration,
-                             device_id=self.device_id)
+        event = GenericEvent(device_id=self.device_id)
+        event.device.registration.event_type = event_type
+        event.device.registration.event_message = msg
         self.send_event(event)
 
 
@@ -185,9 +203,9 @@ class HuePlugin(AntonPlugin):
         self.config = Config(Path(plugin_startup_info.data_dir) / "config.json")
 
         registry = self.channel_registrar()
-        registry.register_controller(PipeType.IOT_INSTRUCTION,
+        registry.register_controller(IOT_INSTRUCTION,
                                      self.instruction_controller)
-        registry.register_controller(PipeType.IOT_EVENTS, event_controller)
+        registry.register_controller(IOT_EVENTS, event_controller)
 
     def on_start(self):
         self.discovery_thread = Thread(target=self.discover_bridges)
