@@ -21,8 +21,8 @@ from anton.plugin_pb2 import IOT_INSTRUCTION, IOT_EVENTS
 from anton.call_status_pb2 import CallStatus
 from anton.device_pb2 import DEVICE_KIND_LIGHTS, DEVICE_STATUS_ONLINE
 from anton.device_pb2 import DEVICE_STATUS_UNREGISTERED, DEVICE_STATUS_OFFLINE
+from anton.device_pb2 import DeviceRegistrationEvent
 from anton.events_pb2 import GenericEvent
-from anton.events_pb2 import DeviceRegistrationEvent
 from anton.capabilities_pb2 import Capabilities, DeviceRegistrationCapabilities
 from anton.power_pb2 import POWER_OFF, POWER_ON
 from anton.color_pb2 import COLOR_MODEL_RGB, COLOR_MODEL_HUE_SAT
@@ -76,23 +76,23 @@ class HueDevicesController:
         for _, light in self.lights_manager.get_all_lights().items():
             self.devices[light.unique_id] = light
 
-            capabilities = Capabilities()
+            event = GenericEvent(device_id=light.unique_id)
+            event.device.friendly_name = light.name
+            event.device.device_kind = DEVICE_KIND_LIGHTS
+            event.device.device_status = DEVICE_STATUS_ONLINE
+
+            capabilities = event.device.capabilities
             capabilities.power_state.supported_power_states[:] = [
                     POWER_OFF, POWER_ON]
 
             color_modes = light.capabilities.supported_color_modes()
             if "hs" in color_modes:
-                capabilities.color.color_models.append(COLOR_MODEL_RGB)
-                capabilities.color.color_models.append(COLOR_MODEL_HUE_SAT)
+                capabilities.color.supported_color_models.append(
+                        COLOR_MODEL_RGB)
+                capabilities.color.supported_color_models.append(
+                        COLOR_MODEL_HUE_SAT)
             if "ct" in color_modes:
-                capabilities.color.color_models.append(COLOR_MODEL_TEMPERATURE)
-
-            event = GenericEvent(device_id=light.unique_id)
-            event.device.friendly_name = light.name
-            event.device.device_kind = DEVICE_KIND_LIGHTS
-            event.device.device_status = DEVICE_STATUS_ONLINE
-            event.device.capabilities = capabilities
-            event.device.online.capabilities = capabilities
+                capabilities.color.supported_color_models.append(COLOR_MODEL_TEMPERATURE)
 
             self.send_event(event)
 
@@ -141,18 +141,16 @@ class RegistrationController:
         self.watcher = None
         self.device_id = "HueRegistration-" + str(id(self))
 
-        # Send online event for the Bridge first, to enable registration.
-        capabilities = Capabilities()
-        capabilities.device_registration_capabilities.greeting_text = (
-                "Hue Bridge discovered. Register?")
-                device_registration_capabilities=device_reg_capabilities)
-
         event = GenericEvent(device_id=self.device_id)
         event.device.friendly_name = "Hue Bridge"
         event.device.device_kind = DEVICE_KIND_LIGHTS
         event.device.device_status = DEVICE_STATUS_UNREGISTERED
-        event.device.capabilities = capabilities
-        event.device.registration.capabilities = capabilities
+
+        capabilities = event.device.capabilities
+        # Send online event for the Bridge first, to enable registration.
+        capabilities.device_registration_capabilities.greeting_text = (
+                "Hue Bridge discovered. Register?")
+
         self.send_event(event)
 
 
@@ -172,12 +170,12 @@ class RegistrationController:
         if self.watcher.status == REGISTRATION_FAILED:
             self.send_registration_event(
                     "Registration Failed.", DeviceRegistrationEvent.FAILURE)
-        elif self.watcher.status == REGISTRATION_SUCEEDED:
+        elif self.watcher.status == REGISTRATION_SUCCEEDED:
+            self.config["username"] = self.watcher.username
             self.send_registration_event(
                     "Registration successful!", DeviceRegistrationEvent.SUCCESS)
             offline_event = GenericEvent(device_id=self.device_id)
             offline_event.device.device_status = DEVICE_STATUS_OFFLINE
-            offline_event.device.offline.SetInParent()
 
             conn = AuthenticatedHueConnection(self.conn.host,
                                               self.watcher.username)
@@ -236,18 +234,16 @@ class HuePlugin(AntonPlugin):
 
         controller = RegistrationController(conn, self.send_event, self.config,
                                             self.on_successful_registration)
-        self.instruction_controller.register_api(
-                "device_registration_instruction", controller.on_instruction)
+        self.instruction_controller.register_api("device",
+                                                 controller.on_instruction)
 
     def on_successful_registration(self, conn):
-        self.instruction_controller.unregister_api(
-                "device_registration_instruction")
+        self.instruction_controller.unregister_api("device")
 
         controller = HueDevicesController(conn, self.send_event)
         self.instruction_controller.register_api(
-                "power_state_instruction", controller.on_power_state)
-        self.instruction_controller.register_api("color_instruction",
-                                                 controller.on_color)
+                "power_state", controller.on_power_state)
+        self.instruction_controller.register_api("color", controller.on_color)
 
 
         controller.start()
