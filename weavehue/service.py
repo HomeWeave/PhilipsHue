@@ -93,7 +93,8 @@ class HueDevicesController:
                 capabilities.color.supported_color_models.append(
                         COLOR_MODEL_HUE_SAT)
             if "ct" in color_modes:
-                capabilities.color.supported_color_models.append(COLOR_MODEL_TEMPERATURE)
+                capabilities.color.supported_color_models.append(
+                        COLOR_MODEL_TEMPERATURE)
 
             self.send_event(event)
 
@@ -115,6 +116,10 @@ class HueDevicesController:
         elif power_instruction == POWER_ON:
             self.lights_manager.run_effect(light, SwitchOnEffect())
 
+        event = GenericEvent(device_id=light.unique_id)
+        event.power_state.power_state = power_instruction
+        self.send_event(event)
+
     def on_color(self, instruction):
         light = self.devices.get(instruction.device_id, None)
         if not light:
@@ -123,18 +128,22 @@ class HueDevicesController:
         color_space = instruction.color.WhichOneof('ColorMode')
 
         if color_space == 'rgb':
-            color = Color.from_rgb(instruction.color_instruction.rgb.red,
-                                   instruction.color_instruction.rgb.green,
-                                   instruction.color_instruction.rgb.blue)
+            color = Color.from_rgb(instruction.color.rgb.red,
+                                   instruction.color.rgb.green,
+                                   instruction.color.rgb.blue)
         elif color_space == 'temperature':
             color = Color.from_temperature(
-                    instruction.color_instruction.temperature.kelvin)
+                    instruction.color.temperature.kelvin)
         elif color_space == 'hs':
-            color = Color.from_hue_sat(instruction.color_instruction.hs.hue,
-                                       instruction.color_instruction.hs.sat)
+            color = Color.from_hue_sat(instruction.color.hs.hue,
+                                       instruction.color.hs.sat)
 
         effect = SetLightStateEffect(on=True, color=color)
         self.lights_manager.run_effect(light, effect)
+
+        event = GenericEvent(device_id=light.unique_id)
+        event.color.CopyFrom(instruction.color)
+        self.send_event(event)
 
 
 class RegistrationController:
