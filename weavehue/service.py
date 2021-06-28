@@ -76,6 +76,7 @@ class HueDevicesController:
         for _, light in self.lights_manager.get_all_lights().items():
             self.devices[light.unique_id] = light
 
+            # First send an online event.
             event = GenericEvent(device_id=light.unique_id)
             event.device.friendly_name = light.name
             event.device.device_kind = DEVICE_KIND_LIGHTS
@@ -94,6 +95,12 @@ class HueDevicesController:
             if "ct" in color_modes:
                 capabilities.color.supported_color_models.append(COLOR_MODEL_TEMPERATURE)
 
+            self.send_event(event)
+
+            # Next, send power_state event.
+            event = GenericEvent(device_id=light.unique_id)
+            event.power_state.power_state = (
+                    POWER_ON if light.state.on else POWER_OFF)
             self.send_event(event)
 
     def on_power_state(self, instruction):
