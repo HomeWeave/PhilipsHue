@@ -127,6 +127,7 @@ class HueDevicesController:
 
         color_space = instruction.color.WhichOneof('ColorMode')
 
+        color = None
         if color_space == 'rgb':
             color = Color.from_rgb(instruction.color.rgb.red,
                                    instruction.color.rgb.green,
@@ -138,7 +139,12 @@ class HueDevicesController:
             color = Color.from_hue_sat(instruction.color.hs.hue,
                                        instruction.color.hs.sat)
 
-        effect = SetLightStateEffect(on=True, color=color)
+        brightness = instruction.color.brightness
+        if brightness:
+            brightness = int(brightness * 2.55)
+
+        effect = SetLightStateEffect(on=True, color=color,
+                                     brightness=brightness)
         self.lights_manager.run_effect(light, effect)
 
         event = GenericEvent(device_id=light.unique_id)
