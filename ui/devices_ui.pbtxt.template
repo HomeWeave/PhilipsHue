@@ -1,0 +1,23 @@
+scroll_layout {
+  {% for device in latest_settings.devices %}
+    containers {
+      id: "title_{{ device.id }}_normal"
+      replacement_target: "title_{{ device.id }}_normal"
+      grid_layout {
+        text {
+          text: "{{ device.name }}"
+        }
+      }
+    }
+  {% endfor %}
+  {% if latest_settings.devices.length == 0 %}
+    containers {
+      id: "title_prompt_configure"
+      grid_layout {
+        text {
+          text: "No Hue Devices found/configured."
+        }
+      }
+    }
+  {% endif %}
+}
