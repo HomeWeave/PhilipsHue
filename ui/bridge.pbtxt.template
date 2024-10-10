@@ -1,14 +1,15 @@
 id: "txtBridge"
 replacement_target: "bridge_section"
 scroll_layout {
+  containers [
   {% if not bridge.status %}
-    containers {
+    {
       id: "status"
       text {
         text: "No Hue devices configured!"
       }
-    }
-    containers {
+    },
+    {
       id: "discover_button"
       button {
         text: "Discover Hue Bridge"
@@ -20,20 +21,24 @@ scroll_layout {
       }
     }
   {% elif bridge.status == "discovering" %}
-    containers {
+    {
       id: "status"
       text {
         text: "Discovering Hue bridges..."
       }
     }
   {% elif bridge.status == "unregistered" or bridge.status=="registration error" %}
-    containers {
+    {
       id: "status"
       text {
-        text: "Bridge found at {{ bridge.host }}"
+        text:
+        {% if bridge.status == "registration error" %}
+        "Previous attempt failed. "
+        {% endif %}
+        "Bridge found at {{ bridge.host }}"
       }
-    }
-    containers {
+    },
+    {
       id: "register_button"
       button {
         text: "Register Hue Bridge"
@@ -45,18 +50,26 @@ scroll_layout {
       }
     }
   {% elif bridge.status == "waiting" %}
-    containers {
+    {
       id: "status"
       text {
         text: "Please press the button on the bridge to register."
       }
     }
   {% elif bridge.status == "not found" %}
-    containers {
+    {
       id: "status"
       text {
         text: "Unable to find any Philips Hue Bridge."
       }
     }
+  {% elif bridge.status == "connected" %}
+    {
+      id: "status"
+      text {
+        text: "Connected to Philips Hue Bridge at {{ bridge.host }}"
+      }
+    }
   {% endif %}
+  ]
 }

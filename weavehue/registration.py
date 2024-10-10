@@ -41,7 +41,11 @@ class HueRegistrationController:
         username = self.settings.get_prop("username")
         if username:
             self.conn = AuthenticatedHueConnection(conn.host, username)
-            self.callback({"status": "connected", "host": conn.host})
+            self.callback({
+                "status": "connected",
+                "host": self.conn.host,
+                "conn": self.conn
+            })
             log_info("Connected to Hue at: " + conn.host)
         else:
             self.conn = conn
@@ -61,20 +65,17 @@ class HueRegistrationController:
         self.callback({"status": "waiting", "host": self.conn.host})
         return True
 
-    def on_successful_registration(self, conn):
-        callback({"status": "connected", "host": conn.host})
-        self.instruction_controller.unregister_api("device")
-
-        controller = HueDevicesController(conn, self.send_event)
-        controller.start()
-
     def registration_callback(self):
         if self.watcher.status == REGISTRATION_FAILED:
             self.callback({"status": "registration error"})
         elif self.watcher.status == REGISTRATION_SUCCEEDED:
             self.settings.set_prop("username", self.watcher.username)
-            conn = AuthenticatedHueConnection(self.conn.host,
-                                              self.watcher.username)
-            self.callback({"status": "connected", "host": conn.host})
+            self.conn = AuthenticatedHueConnection(self.conn.host,
+                                                   self.watcher.username)
+            self.callback({
+                "status": "connected",
+                "host": self.conn.host,
+                "conn": self.conn
+            })
 
         self.watcher = None

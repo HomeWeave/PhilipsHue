@@ -115,25 +115,6 @@ configured_actions {
   }
 }
 configured_actions {
-  key: "add_device"
-  value {
-    actions {
-      input_control_action {
-        bus_key: "dropDownDeviceTypes"
-        retrieve_value: true
-        target_id: "new_device_type"
-      }
-    }
-    actions {
-      action_id: "send_data"
-      additional_context {
-        key: "payload"
-        value: "{ 'action': 'add_device', 'type': '{{ new_device_type }}' }"
-      }
-    }
-  }
-}
-configured_actions {
   key: "handle_settings_change"
   value {
     actions {
