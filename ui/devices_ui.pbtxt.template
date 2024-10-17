@@ -13,10 +13,8 @@ scroll_layout {
   {% if latest_settings.devices.length == 0 %}
     containers {
       id: "title_prompt_configure"
-      grid_layout {
-        text {
-          text: "No Hue Devices found/configured."
-        }
+      text {
+        text: "No Hue Devices found/configured."
       }
     }
   {% endif %}

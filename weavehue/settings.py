@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-from pyhuelights.registration import AuthenticatedHueConnection
-
 DEFAULT = {"devices": []}
 
 

@@ -133,9 +133,6 @@ class HuePlugin(AntonPlugin):
     def on_stop(self):
         pass
 
-    def on_response(self, call_status):
-        print("Received response:", call_status)
-
     def on_hue_connect(self, conn):
         self.device_handler = HueDevicesController(conn)
         self.channel.set_device_handler(self.device_handler)
