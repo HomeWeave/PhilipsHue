@@ -10,9 +10,8 @@ from pyantonlib.utils import log_info, log_warn
 
 class HueRegistrationController:
 
-    def __init__(self, plugin, settings, callback):
+    def __init__(self, settings, callback):
         self.settings = settings
-        self.plugin = plugin
         self.callback = callback
         self.conn = None
         self.watcher = None

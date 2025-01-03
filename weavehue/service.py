@@ -109,7 +109,7 @@ class HuePlugin(AntonPlugin):
         registry.register_controller(PipeType.DEFAULT, self.channel)
 
         self.registration_controller = HueRegistrationController(
-            self, self.settings, self.registration_state_helper.get_listener())
+            self.settings, self.registration_state_helper.get_listener())
 
         # All actions from DynamicApp.
         self.app_handler.register_action(
