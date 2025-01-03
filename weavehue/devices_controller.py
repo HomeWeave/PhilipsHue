@@ -11,7 +11,7 @@ from pyantonlib.utils import log_warn
 from anton.call_status_pb2 import CallStatus, Status
 from anton.state_pb2 import DeviceState
 from anton.capabilities_pb2 import Capabilities
-from anton.power_pb2 import POWER_OFF, POWER_ON, PowerInstruction
+from anton.power_pb2 import PowerState
 from anton.color_pb2 import COLOR_MODEL_RGB, COLOR_MODEL_HUE_SAT
 from anton.color_pb2 import COLOR_MODEL_TEMPERATURE
 from anton.device_pb2 import DEVICE_KIND_LIGHTS, DEVICE_STATUS_ONLINE
@@ -23,13 +23,13 @@ def to_device_status(light):
 
 
 def to_device_power_state(light):
-    return POWER_ON if light.state.on else POWER_OFF
+    return PowerState.POWER_STATE_ON if light.state.on else PowerState.POWER_STATE_OFF
 
 
-def handle_power_instruction(device_handler, lm, device, power_instruction):
-    if power_instruction == PowerInstruction.POWER_OFF:
+def handle_power_state_update(device_handler, lm, device, power_state):
+    if power_state == PowerState.POWER_STATE_OFF:
         lm.run_effect(device, SwitchOffEffect())
-    elif power_instruction == PowerInstruction.POWER_ON:
+    elif power_state == PowerState.POWER_STATE_ON:
         lm.run_effect(device, SwitchOnEffect())
 
     device_handler.devices[device.id] = lm.get_resource(device)
@@ -78,16 +78,16 @@ class HueDevicesController(DeviceHandlerBase):
             self.populate_device_state(device, state)
             self.send_device_state_updated(state)
 
-    def handle_instruction(self, msg, responder):
-        log_warn("Handling instruction: " + str(msg))
+    def handle_set_device_state(self, msg, responder):
+        log_warn("Handling set_device_state: " + str(msg))
 
         device = self.devices.get(msg.device_id)
         if device is None:
             raise ResourceNotFound(msg.device_id)
 
-        if msg.power_instruction != PowerInstruction.UNKNOWN:
-            handle_power_instruction(self, self.lights_manager, device,
-                                     msg.power_instruction)
+        if msg.power_state != PowerState.POWER_STATE_UNKNOWN:
+            handle_power_state_update(self, self.lights_manager, device,
+                                      msg.power_state)
             responder(CallStatus(code=Status.STATUS_OK))
             return
 
@@ -95,8 +95,8 @@ class HueDevicesController(DeviceHandlerBase):
 
     def populate_capabilities(self, device, state):
         capabilities = state.capabilities
-        capabilities.power_state.supported_power_instructions[:] = [
-            POWER_OFF, POWER_ON
+        capabilities.power_state.supported_power_states[:] = [
+            PowerState.POWER_STATE_OFF, PowerState.POWER_STATE_ON
         ]
 
         color_modes = device.capabilities.supported_color_modes()
