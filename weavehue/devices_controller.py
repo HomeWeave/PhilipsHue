@@ -14,6 +14,7 @@ from anton.capabilities_pb2 import Capabilities
 from anton.power_pb2 import PowerState
 from anton.color_pb2 import COLOR_MODEL_RGB, COLOR_MODEL_HUE_SAT
 from anton.color_pb2 import COLOR_MODEL_TEMPERATURE
+from anton.color_pb2 import Color as AntonColor
 from anton.device_pb2 import DEVICE_KIND_LIGHTS, DEVICE_STATUS_ONLINE
 from anton.device_pb2 import DEVICE_STATUS_OFFLINE
 
@@ -26,7 +27,24 @@ def to_device_power_state(light):
     return PowerState.POWER_STATE_ON if light.state.on else PowerState.POWER_STATE_OFF
 
 
-def handle_power_state_update(device_handler, lm, device, power_state):
+def to_device_brightness(light):
+    return int(light.state.brightness / 255.0 * 100)
+
+
+def to_device_color_state(light):
+    res = AntonColor()
+    if light.state.color_mode == "ct":
+        res.temperature.kelvin = int(10000.0 / light.state.temperature)
+    if light.state.color_mode == "hs":
+        res.hs.hue = light.state.hue
+        res.hs.sat = light.state.sat
+    if light.state.color_mode == "xy":
+        log_warn("Can not process xy color mode yet.")
+
+    return res
+
+
+def handle_power_state_request(device_handler, lm, device, power_state):
     if power_state == PowerState.POWER_STATE_OFF:
         lm.run_effect(device, SwitchOffEffect())
     elif power_state == PowerState.POWER_STATE_ON:
@@ -35,14 +53,33 @@ def handle_power_state_update(device_handler, lm, device, power_state):
     device_handler.devices[device.id] = lm.get_resource(device)
 
 
-class HueLightsStateRefresher:
+def handle_color_state_request(device_handler, lm, device, color):
+    if not color:
+        return
 
-    def __init__(self, conn, on_event):
-        self.staging = []
-        self.conn = conn
+    if color.WhichOneof('ColorMode') == 'rgb':
+        lib_color = Color.from_rgb(color.rgb.red, color.rgb.green,
+                                   color.rgb.blue)
+    elif color.WhichOneof('ColorMode') == 'temperature':
+        lib_color = Color.from_temperature(color.temperature.kelvin)
+    elif color.WhichOneof('ColorMode') == 'hs':
+        lib_color = Color.from_hue_sat(color.hs.hue, color.hs.sat)
+    else:
+        return
 
-    def push(self, device):
-        pass
+    lm.run_effect(device, SetLightStateEffect(on=True, color=lib_color))
+    device_handler.devices[device.id] = lm.get_resource(device)
+
+
+def handle_brightness_request(device_handler, lm, device, brightness):
+    if brightness < 0 or brightness > 100:
+        log_warn("Brightness needs to be in the range [0, 100]")
+        return
+
+    value = int(brightness / 100.0 * 255.0)
+    lm.run_effect(device, SetLightStateEffect(on=(value > 0),
+                                              brightness=value))
+    device_handler.devices[device.id] = lm.get_resource(device)
 
 
 class HueDevicesController(DeviceHandlerBase):
@@ -86,12 +123,18 @@ class HueDevicesController(DeviceHandlerBase):
             raise ResourceNotFound(msg.device_id)
 
         if msg.power_state != PowerState.POWER_STATE_UNKNOWN:
-            handle_power_state_update(self, self.lights_manager, device,
-                                      msg.power_state)
-            responder(CallStatus(code=Status.STATUS_OK))
-            return
+            handle_power_state_request(self, self.lights_manager, device,
+                                       msg.power_state)
 
-        raise AntonInternalError("Unknown instruction.")
+        if msg.HasField('color_state'):
+            handle_color_state_request(self, self.lights_manager, device,
+                                       msg.color_state)
+
+        if msg.brightness > 0:
+            handle_brightness_request(self, self.lights_manager, device,
+                                      msg.brightness)
+
+        responder(CallStatus(code=Status.STATUS_OK))
 
     def populate_capabilities(self, device, state):
         capabilities = state.capabilities
@@ -104,47 +147,16 @@ class HueDevicesController(DeviceHandlerBase):
             capabilities.color.supported_color_models.append(COLOR_MODEL_RGB)
             capabilities.color.supported_color_models.append(
                 COLOR_MODEL_HUE_SAT)
-        if "ct" in color_modes:
-            capabilities.color.supported_color_models.append(
-                COLOR_MODEL_TEMPERATURE)
+        capabilities.color.supported_color_models.append(
+            COLOR_MODEL_TEMPERATURE)
 
         return capabilities
 
     def populate_device_state(self, light, state):
         state.device_status = to_device_status(light)
         state.power_state = to_device_power_state(light)
-
-    def on_color(self, instruction):
-        light = self.devices.get(instruction.device_id, None)
-        if not light:
-            return CallStatus(msg="Bad device ID.")
-
-        color_space = instruction.color.WhichOneof('ColorMode')
-
-        color = None
-        if color_space == 'rgb':
-            color = Color.from_rgb(instruction.color.rgb.red,
-                                   instruction.color.rgb.green,
-                                   instruction.color.rgb.blue)
-        elif color_space == 'temperature':
-            color = Color.from_temperature(
-                instruction.color.temperature.kelvin)
-        elif color_space == 'hs':
-            color = Color.from_hue_sat(instruction.color.hs.hue,
-                                       instruction.color.hs.sat)
-
-        brightness = instruction.color.brightness
-        if brightness:
-            brightness = int(brightness * 2.55)
-
-        effect = SetLightStateEffect(on=True,
-                                     color=color,
-                                     brightness=brightness)
-        self.lights_manager.run_effect(light, effect)
-
-        event = GenericEvent(device_id=light.unique_id)
-        event.color.CopyFrom(instruction.color)
-        self.send_event(event)
+        state.color_state.CopyFrom(to_device_color_state(light))
+        state.brightness = to_device_brightness(light)
 
 
 class UnregisteredHueController(DeviceHandlerBase):
