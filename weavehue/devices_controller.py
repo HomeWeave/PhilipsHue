@@ -34,7 +34,7 @@ def to_device_brightness(light):
 def to_device_color_state(light):
     res = AntonColor()
     if light.state.color_mode == "ct":
-        res.temperature.kelvin = int(10000.0 / light.state.temperature)
+        res.temperature.kelvin = light.state.temperature
     if light.state.color_mode == "hs":
         res.hs.hue = light.state.hue
         res.hs.sat = light.state.sat
