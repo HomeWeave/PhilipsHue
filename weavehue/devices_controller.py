@@ -61,7 +61,7 @@ def handle_color_state_request(device_handler, lm, device, color):
         lib_color = Color.from_rgb(color.rgb.red, color.rgb.green,
                                    color.rgb.blue)
     elif color.WhichOneof('ColorMode') == 'temperature':
-        lib_color = Color.from_temperature(color.temperature.kelvin)
+        lib_color = Color.from_kelvin(color.temperature.kelvin)
     elif color.WhichOneof('ColorMode') == 'hs':
         lib_color = Color.from_hue_sat(color.hs.hue, color.hs.sat)
     else:
