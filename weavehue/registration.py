@@ -1,4 +1,5 @@
-from threading import Thread
+import asyncio
+import inspect
 
 from pyhuelights.discovery import DefaultDiscovery, DiscoveryFailed
 from pyhuelights.registration import RegistrationWatcher
@@ -10,16 +11,18 @@ from pyantonlib.utils import log_info, log_warn
 
 class HueRegistrationController:
 
-    def __init__(self, settings, callback):
+    def __init__(self, settings, callback, loop):
         self.settings = settings
         self.callback = callback
+        self.loop = loop
         self.conn = None
         self.watcher = None
 
     def start_discovery(self):
-        Thread(target=self.discover_bridges).start()
+        self.loop.call_soon_threadsafe(
+            lambda: self.loop.create_task(self.discover_bridges()))
 
-    def discover_bridges(self):
+    async def discover_bridges(self):
         self.callback({"status": "discovering"})
 
         discovery = DefaultDiscovery()
@@ -27,7 +30,7 @@ class HueRegistrationController:
         for x in range(3):
             try:
                 log_info("Discovering Hue Bridges..")
-                conn = discovery.discover()
+                conn = await discovery.discover()
                 break
             except DiscoveryFailed:
                 log_warn("No Hue bridges found.")
@@ -58,13 +61,13 @@ class HueRegistrationController:
 
         self.watcher = RegistrationWatcher(
             self.conn.host, "PyHueLights#Anton", 30.0,
-            lambda: self.registration_callback())
+            callback=self.registration_callback)
         self.watcher.start()
 
         self.callback({"status": "waiting", "host": self.conn.host})
         return True
 
-    def registration_callback(self):
+    async def registration_callback(self):
         if self.watcher.status == REGISTRATION_FAILED:
             self.callback({"status": "registration error"})
         elif self.watcher.status == REGISTRATION_SUCCEEDED:

@@ -1,5 +1,7 @@
 import time
 import json
+import threading
+import asyncio
 from pathlib import Path
 
 from pyantonlib.plugin import AntonPlugin
@@ -93,6 +95,9 @@ def send_states(send_fn, *args):
 class HuePlugin(AntonPlugin):
 
     def setup(self, plugin_startup_info):
+        self.loop = asyncio.new_event_loop()
+        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+
         self.app_handler = AppHandler(plugin_startup_info)
         self.registration_state_helper = RegistrationStateHelper(
             self.app_handler, self.on_hue_connect)
@@ -109,7 +114,8 @@ class HuePlugin(AntonPlugin):
         registry.register_controller(PipeType.DEFAULT, self.channel)
 
         self.registration_controller = HueRegistrationController(
-            self.settings, self.registration_state_helper.get_listener())
+            self.settings, self.registration_state_helper.get_listener(),
+            self.loop)
 
         # All actions from DynamicApp.
         self.app_handler.register_action(
@@ -131,9 +137,11 @@ class HuePlugin(AntonPlugin):
             print("Not starting discovery: Not configured.")
 
     def on_stop(self):
-        pass
+        if hasattr(self.device_handler, 'stop'):
+            self.device_handler.stop()
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
     def on_hue_connect(self, conn):
-        self.device_handler = HueDevicesController(conn)
+        self.device_handler = HueDevicesController(conn, self.loop)
         self.channel.set_device_handler(self.device_handler)
         self.device_handler.start()

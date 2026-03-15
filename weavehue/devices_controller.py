@@ -1,7 +1,6 @@
-from threading import Thread
+import asyncio
 
-from pyhuelights.manager import LightsManager
-from pyhuelights.core import Color
+from pyhuelights.core import RGB, Temperature, HueSat, LightsManager
 from pyhuelights.animations import SwitchOnEffect, SwitchOffEffect
 from pyhuelights.animations import SetLightStateEffect
 
@@ -20,84 +19,94 @@ from anton.device_pb2 import DEVICE_STATUS_OFFLINE
 
 
 def to_device_status(light):
-    return DEVICE_STATUS_ONLINE if light.state.reachable else DEVICE_STATUS_OFFLINE
+    return DEVICE_STATUS_ONLINE if light.reachable else DEVICE_STATUS_OFFLINE
 
 
 def to_device_power_state(light):
-    return PowerState.POWER_STATE_ON if light.state.on else PowerState.POWER_STATE_OFF
+    return PowerState.POWER_STATE_ON if light.on else PowerState.POWER_STATE_OFF
 
 
 def to_device_brightness(light):
-    return int(light.state.brightness / 255.0 * 100)
+    return int((light.brightness or 0) / 255.0 * 100)
 
 
 def to_device_color_state(light):
     res = AntonColor()
-    if light.state.color_mode == "ct":
-        res.temperature.kelvin = light.state.temperature
-    if light.state.color_mode == "hs":
-        res.hs.hue = light.state.hue
-        res.hs.sat = light.state.sat
-    if light.state.color_mode == "xy":
-        log_warn("Can not process xy color mode yet.")
+    color = light.color
+    if isinstance(color, Temperature):
+        res.temperature.kelvin = color.value
+    elif isinstance(color, HueSat):
+        res.hs.hue = color.hue
+        res.hs.sat = color.saturation
+    elif isinstance(color, RGB):
+        res.rgb.red = color.r
+        res.rgb.green = color.g
+        res.rgb.blue = color.b
 
     return res
 
 
-def handle_power_state_request(device_handler, lm, device, power_state):
+async def handle_power_state_request(device_handler, lm, device, power_state):
     if power_state == PowerState.POWER_STATE_OFF:
-        lm.run_effect(device, SwitchOffEffect())
+        await lm.run_effect(device, SwitchOffEffect())
     elif power_state == PowerState.POWER_STATE_ON:
-        lm.run_effect(device, SwitchOnEffect())
-
-    device_handler.devices[device.id] = lm.get_resource(device)
+        await lm.run_effect(device, SwitchOnEffect())
 
 
-def handle_color_state_request(device_handler, lm, device, color):
+async def handle_color_state_request(device_handler, lm, device, color):
     if not color:
         return
 
     if color.WhichOneof('ColorMode') == 'rgb':
-        lib_color = Color.from_rgb(color.rgb.red, color.rgb.green,
-                                   color.rgb.blue)
+        lib_color = RGB(color.rgb.red, color.rgb.green, color.rgb.blue)
     elif color.WhichOneof('ColorMode') == 'temperature':
-        lib_color = Color.from_kelvin(color.temperature.kelvin)
+        lib_color = Temperature(color.temperature.kelvin)
     elif color.WhichOneof('ColorMode') == 'hs':
-        lib_color = Color.from_hue_sat(color.hs.hue, color.hs.sat)
+        lib_color = HueSat(color.hs.hue, color.hs.sat)
     else:
         return
 
-    lm.run_effect(device, SetLightStateEffect(on=True, color=lib_color))
-    device_handler.devices[device.id] = lm.get_resource(device)
+    await lm.run_effect(device, SetLightStateEffect(on=True, color=lib_color))
 
 
-def handle_brightness_request(device_handler, lm, device, brightness):
+async def handle_brightness_request(device_handler, lm, device, brightness):
     if brightness < 0 or brightness > 100:
         log_warn("Brightness needs to be in the range [0, 100]")
         return
 
     value = int(brightness / 100.0 * 255.0)
-    lm.run_effect(device, SetLightStateEffect(on=(value > 0),
-                                              brightness=value))
-    device_handler.devices[device.id] = lm.get_resource(device)
+    await lm.run_effect(device,
+                        SetLightStateEffect(on=(value > 0), brightness=value))
 
 
 class HueDevicesController(DeviceHandlerBase):
 
-    def __init__(self, conn):
+    def __init__(self, conn, loop):
         super().__init__()
         self.lights_manager = LightsManager(conn)
-        self.watcher_thread = Thread(target=self.watch)
-
         self.devices = {}
+        self.watcher_task = None
+        self.loop = loop
 
     def start(self):
-        for _, light in self.lights_manager.get_all_lights().items():
-            self.devices[light.unique_id] = light
+
+        def _create_task():
+            self.watcher_task = self.loop.create_task(self._start_async())
+
+        self.loop.call_soon_threadsafe(_create_task)
+
+    def stop(self):
+        if self.watcher_task:
+            self.loop.call_soon_threadsafe(self.watcher_task.cancel)
+
+    async def _start_async(self):
+        lights = await self.lights_manager.get_all_lights()
+        for _, light in lights.items():
+            self.devices[light.id] = light
 
             # First send an online event.
-            state = DeviceState(device_id=light.unique_id,
-                                friendly_name=light.name,
+            state = DeviceState(device_id=light.id,
+                                friendly_name=light.metadata.name,
                                 kind=DEVICE_KIND_LIGHTS)
 
             self.populate_capabilities(light, state)
@@ -105,15 +114,18 @@ class HueDevicesController(DeviceHandlerBase):
 
             self.send_device_state_updated(state)
 
-        self.watcher_thread.start()
+        await self.watch()
 
-    def watch(self):
-        for device in self.lights_manager.iter_events():
-            self.devices[device.id] = device
+    async def watch(self):
+        try:
+            async for device in self.lights_manager.iter_events():
+                self.devices[device.id] = device
 
-            state = DeviceState(device_id=device.unique_id)
-            self.populate_device_state(device, state)
-            self.send_device_state_updated(state)
+                state = DeviceState(device_id=device.id)
+                self.populate_device_state(device, state)
+                self.send_device_state_updated(state)
+        except Exception as e:
+            print("Exception:", e)
 
     def handle_set_device_state(self, msg, responder):
         log_warn("Handling set_device_state: " + str(msg))
@@ -122,19 +134,28 @@ class HueDevicesController(DeviceHandlerBase):
         if device is None:
             raise ResourceNotFound(msg.device_id)
 
-        if msg.power_state != PowerState.POWER_STATE_UNKNOWN:
-            handle_power_state_request(self, self.lights_manager, device,
-                                       msg.power_state)
+        self.loop.call_soon_threadsafe(lambda: self.loop.create_task(
+            self._handle_set_device_state_async(msg, responder, device)))
 
-        if msg.HasField('color_state'):
-            handle_color_state_request(self, self.lights_manager, device,
-                                       msg.color_state)
+    async def _handle_set_device_state_async(self, msg, responder, device):
+        try:
+            if msg.power_state != PowerState.POWER_STATE_UNKNOWN:
+                await handle_power_state_request(self, self.lights_manager,
+                                                 device, msg.power_state)
 
-        if msg.brightness > 0:
-            handle_brightness_request(self, self.lights_manager, device,
-                                      msg.brightness)
+            if msg.HasField('color_state'):
+                await handle_color_state_request(self, self.lights_manager,
+                                                 device, msg.color_state)
 
-        responder(CallStatus(code=Status.STATUS_OK))
+            if msg.brightness > 0:
+                await handle_brightness_request(self, self.lights_manager,
+                                                device, msg.brightness)
+
+            responder(CallStatus(code=Status.STATUS_OK))
+        except Exception as e:
+            log_warn(f"Error handling device state: {e}")
+            responder(
+                CallStatus(code=Status.STATUS_INTERNAL_ERROR, message=str(e)))
 
     def populate_capabilities(self, device, state):
         capabilities = state.capabilities
@@ -142,13 +163,15 @@ class HueDevicesController(DeviceHandlerBase):
             PowerState.POWER_STATE_OFF, PowerState.POWER_STATE_ON
         ]
 
-        color_modes = device.capabilities.supported_color_modes()
-        if "hs" in color_modes:
+        models = device.capabilities.supported_color_models
+        if RGB in models:
             capabilities.color.supported_color_models.append(COLOR_MODEL_RGB)
+        if HueSat in models:
             capabilities.color.supported_color_models.append(
                 COLOR_MODEL_HUE_SAT)
-        capabilities.color.supported_color_models.append(
-            COLOR_MODEL_TEMPERATURE)
+        if Temperature in models:
+            capabilities.color.supported_color_models.append(
+                COLOR_MODEL_TEMPERATURE)
 
         return capabilities
 
