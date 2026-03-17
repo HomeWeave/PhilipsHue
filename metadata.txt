@@ -7,7 +7,7 @@ runtime {
     runtime_type: PY3
     py3_runtime_info {
         main_service_class: "weavehue.service.HuePlugin"
-        dependencies: "git+https://github.com/supersaiyanmode/pyhuelights.git"
+        dependencies: "git+https://github.com/supersaiyanmode/pyhuelights.git@master"
     }
     pipes {
         pipe_type: DEFAULT

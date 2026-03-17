@@ -104,7 +104,6 @@ class HueDevicesController(DeviceHandlerBase):
         for _, light in lights.items():
             self.devices[light.id] = light
 
-            # First send an online event.
             state = DeviceState(device_id=light.id,
                                 friendly_name=light.metadata.name,
                                 kind=DEVICE_KIND_LIGHTS)
@@ -117,15 +116,12 @@ class HueDevicesController(DeviceHandlerBase):
         await self.watch()
 
     async def watch(self):
-        try:
-            async for device in self.lights_manager.iter_events():
-                self.devices[device.id] = device
+        async for device in self.lights_manager.iter_events():
+            self.devices[device.id] = device
 
-                state = DeviceState(device_id=device.id)
-                self.populate_device_state(device, state)
-                self.send_device_state_updated(state)
-        except Exception as e:
-            print("Exception:", e)
+            state = DeviceState(device_id=device.id)
+            self.populate_device_state(device, state)
+            self.send_device_state_updated(state)
 
     def handle_set_device_state(self, msg, responder):
         log_warn("Handling set_device_state: " + str(msg))
