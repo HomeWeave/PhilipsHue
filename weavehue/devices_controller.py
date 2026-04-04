@@ -158,6 +158,7 @@ class HueDevicesController(DeviceHandlerBase):
         capabilities.power_state.supported_power_states[:] = [
             PowerState.POWER_STATE_OFF, PowerState.POWER_STATE_ON
         ]
+        capabilities.color.supports_brightness = True
 
         models = device.capabilities.supported_color_models
         if RGB in models:
